@@ -1,0 +1,106 @@
+---
+title: "Portfolio Optimization"
+author: "Felix Michalik"
+date: "18 November 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, Cache = TRUE}
+library(quantmod)
+library(rvest)
+sp500 <- read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+
+sp500 %>% 
+html_nodes(".text") %>% 
+html_text() -> ticker_sp500
+
+SP500_symbol <- ticker_sp500[(1:499)*2+1]
+SP500_symbol[SP500_symbol == "BRK.B"] <- "BRK-B"
+SP500_symbol[SP500_symbol == "BF.B"] <- "BF-B"
+
+
+
+today <- Sys.Date()
+three_year_ago <- seq(today, length = 2, by = "-3 year")[2]
+stocks_tickers <- SP500_symbol
+getSymbols(stocks_tickers, from = three_year_ago, to = today)
+nb_ticker <- length(stocks_tickers)
+var_stocks <- rep(NA, nb_ticker)
+names(var_stocks) <- stocks_tickers
+
+
+
+#Set initial Wealth
+W = 10^6
+
+mu_investment = matrix(nrow = nb_ticker, ncol = nb_ticker)
+var_investment = matrix(nrow = nb_ticker, ncol = nb_ticker)
+omega_star = matrix(nrow = nb_ticker, ncol = nb_ticker)
+for (i in 1:nb_ticker){
+for (j in 1:nb_ticker){  
+Ra <- na.omit(ClCl(get(stocks_tickers[i])))
+Rn <- na.omit(ClCl(get(stocks_tickers[j]))) 
+
+#Check if the portfolio is composed of 1 or 2 companies
+if (Ra != Rn){
+  
+# Estimation of mu and Sigma
+Sigma <- cov(cbind(Ra, Rn))
+mu <- c(mean(Ra), mean(Rn))
+
+
+  # Compute omega^*
+omega_star[i,j] <- (Sigma[2, 2] - Sigma[1, 2])/(Sigma[1, 1] + Sigma[2, 2] - 2*Sigma[1, 2])
+
+# chech if omega^* is in the domain D and if applicable search for min at the edges of D
+if (!is.na(omega_star)){
+if (omega_star[i,j]<0.4 || omega_star[i,j]>0.6) {
+  left_edge = 0.4
+  var_investment_left <- left_edge^2*Sigma[1,1] + (1 - left_edge)^2*Sigma[2,2] + 
+  2*left_edge*(1 - left_edge)*Sigma[1,2]
+  
+  right_edge = 0.6
+  var_investment_right <- right_edge^2*Sigma[1,1] + (1 - right_edge)^2*Sigma[2,2] + 
+  2*right_edge*(1 - right_edge)*Sigma[1,2]
+  
+  if (var_investment_left < var_investment_right){
+    omega_star[i,j] = 0.4
+  }else{
+    omega_star[i,j] = 0.6
+  }}}
+
+
+
+# Compute investment expected value and variance
+mu_investment[i,j] <- (omega_star[i,j]*mu[1] + (1 - omega_star[i,j])*mu[2])*W
+var_investment[i,j] <- (omega_star[i,j]^2*Sigma[1,1] + (1 - omega_star[i,j])^2*Sigma[2,2] + 
+  2*omega_star[i,j]*(1 - omega_star[i,j])*Sigma[1,2])*(W^2)
+}else{ # Include variances when only investing in one stock into the matrix
+
+var_investment[i,j] = var(Ra)*(W^2)
+mu_investment[i,j] = mean(Ra)*W
+}}}
+
+#Find best combination or single stock
+best_portfolio = c(which(var_investment == min(var_investment, na.rm = TRUE), arr.ind = TRUE))
+if (stocks_tickers[best_portfolio[1]] !=stocks_tickers[best_portfolio[2]]){
+  print(paste("The best option is to buy", stocks_tickers[best_portfolio[1]], "and", stocks_tickers[best_portfolio[2]], "with a weight w of", omega_star[best_portfolio[1],best_portfolio[2]], ". This combination has a variance of", var_investment[best_portfolio[1],best_portfolio[2]],", a standard deviation of", sqrt(var_investment[best_portfolio[1],best_portfolio[2]]),"and an expected return of", mu_investment[best_portfolio[1],best_portfolio[2]]))
+}else{
+  print(paste("The best option is to buy", stocks_tickers[best_portfolio[1]]))
+}
+  
+#plot 
+
+plot(sqrt(var_investment[,]), mu_investment[,], xlab = "Investment Risk", ylab = "Investment Expected Returns", col = "blue")
+grid(NULL, NULL, lty = 1, col = "grey95")
+points(sqrt(var_investment[best_portfolio[1],best_portfolio[2]]), mu_investment[best_portfolio[1],best_portfolio[2]], col="red")
+
+legend("topright",  inset=.01, legend=c("Possible portfolio", "Min-variance portfolio"),
+       col=c("blue", "red"), pch=1, cex=0.8, box.lty = 0)
+
+```
